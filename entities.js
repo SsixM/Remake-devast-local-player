@@ -9,7 +9,8 @@ export class Player {
         this.friction = 0.82; this.accel = GAME_SETTINGS.player.baseSpeed;
         this.angle = 0;
         
-        this.hp = 100; this.maxHp = 100;
+        // Стандарт здоровья изменен на 255
+        this.hp = 255; this.maxHp = 255;
         this.stamina = 100; this.maxStamina = 100;
         this.water = 100; this.maxWater = 100;
         
@@ -130,34 +131,37 @@ export class Player {
 
     attack() {
         if (this.actionTimer > 0 || this.attackTimer > 0) return;
-        this.attackTimer = 15;
+        this.attackTimer = 12;
 
-        // Определяем урон и инструмент в руках
         const equippedData = this.currentEquipped ? GAME_SETTINGS.items[this.currentEquipped] : null;
         const currentDamage = equippedData && equippedData.damage ? equippedData.damage : GAME_SETTINGS.player.unarmedDamage;
         const currentToolTier = equippedData && equippedData.toolTier ? equippedData.toolTier : 'hand';
 
         for (let i = state.objects.length - 1; i >= 0; i--) {
             const obj = state.objects[i];
-            if (Math.abs(obj.x - this.x) > 200 || Math.abs(obj.y - this.y) > 200) continue;
+            if (Math.abs(obj.x - this.x) > 160 || Math.abs(obj.y - this.y) > 160) continue;
 
             const d = Math.hypot(obj.x - this.x, obj.y - this.y);
-            if (d < 120 + obj.colRadius) {
-                
+            const angleToObj = Math.atan2(obj.y - this.y, obj.x - this.x);
+            let diffAngle = Math.atan2(Math.sin(angleToObj - this.angle), Math.cos(angleToObj - this.angle));
+
+            if (d < 75 + obj.colRadius && Math.abs(diffAngle) < Math.PI / 2.2) {
                 const dropData = ENTITY_DATA[obj.type];
-                // Проверка, правильный ли инструмент
                 const isCorrectTool = !dropData.requiredTool || dropData.requiredTool === currentToolTier;
 
                 if (isCorrectTool) {
-                    obj.hp -= currentDamage; // Полный урон
+                    obj.hp -= currentDamage;
                 } else {
-                    obj.hp -= 1; // Блоки не ломаются легко неправильным инструментом
+                    obj.hp -= 15; // Неправильный инструмент наносит уменьшенный урон, но ломает строения
                 }
                 
+                const pushForce = 14; 
+                obj.offsetX = Math.cos(angleToObj) * pushForce;
+                obj.offsetY = Math.sin(angleToObj) * pushForce;
+
                 obj.updateState();
                 
                 if (obj.hp <= 0) {
-                    // Выдаем дроп только если ломали правильным инструментом
                     if (dropData && dropData.drop && isCorrectTool) {
                         const dropCount = Math.floor(Math.random() * (dropData.dropRange[1] - dropData.dropRange[0] + 1)) + dropData.dropRange[0];
                         this.addToInventory(dropData.drop, dropCount);
@@ -168,59 +172,60 @@ export class Player {
         }
         
         state.greeds.forEach(g => {
-            if (Math.hypot(g.x - this.x, g.y - this.y) < 110) {
+            const d = Math.hypot(g.x - this.x, g.y - this.y);
+            const angleToGreed = Math.atan2(g.y - this.y, g.x - this.x);
+            let diffAngle = Math.atan2(Math.sin(angleToGreed - this.angle), Math.cos(angleToGreed - this.angle));
+
+            if (d < 85 && Math.abs(diffAngle) < Math.PI / 2.2) {
                 g.hp -= currentDamage;
                 g.isFleeing = true;
+
+                const pushForce = 20; 
+                g.offsetX = Math.cos(angleToGreed) * pushForce;
+                g.offsetY = Math.sin(angleToGreed) * pushForce;
             }
         });
     }
 
-draw(ctx) {
+    draw(ctx) {
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
 
-        // Чуть сместил плечи вперед (X: 12), чтобы руки не "тонули" в затылке
         const shoulderLX = 12, shoulderLY = -22;
         const shoulderRX = 12, shoulderRY = 22;
         const armWidth = 22, armHeight = 45; 
 
-        // --- ЛОГИКА ПРАВОЙ РУКИ (БОЕВКА) ---
         let rArmRotation = Math.PI / 2.2; 
         let rArmPullback = 5;
+        let playerSquashX = 1;
 
         if (this.attackTimer > 0) {
-            const t = 15 - this.attackTimer;
-            if (t < 10) { 
-                let p = t / 10;
-                rArmRotation += p * 0.8;
-                rArmPullback = 5 + (p * 10);
-            } else if (t < 20) { // Немного растянул фазу удара для плавности
-                let p = (t - 10) / 10;
-                rArmRotation += 0.8 - (p * 2.2); // Уменьшил размах влево, чтоб не ломать сустав
-                rArmPullback = 15 - (p * 25);
-            } else {
-                let p = (t - 20) / 15;
-                let targetRot = Math.PI / 2.2;
-                let startRot = Math.PI / 2.2 - 1.4;
-                rArmRotation = startRot + (targetRot - startRot) * p;
-                rArmPullback = -10 * (1 - p);
+            const t = 12 - this.attackTimer; 
+            if (t < 3) { 
+                const p = t / 3;
+                rArmRotation = Math.PI / 2.2 - p * 0.6;
+                rArmPullback = 5 - p * 16;
+                playerSquashX = 1.04;
+            } else { 
+                const p = (t - 3) / 9;
+                rArmRotation = (Math.PI / 2.2 - 0.6) + p * 0.6;
+                rArmPullback = -11 + p * 16;
+                playerSquashX = 1.04 - p * 0.04;
             }
         }
 
-        // --- ЛЕВАЯ РУКА (ТЕПЕРЬ НЕ В ПИЗДЕ) ---
+        ctx.scale(playerSquashX, 1 / playerSquashX);
+
         if (images.hand) {
             ctx.save();
             ctx.translate(shoulderLX, shoulderLY);
-            // Поворачиваем вперед и чуть вбок, зеркально правой руке
             ctx.rotate(Math.PI / 2.2); 
             ctx.scale(-1, 1);
-            // Убрал "пассивное вдавливание" (+5), теперь она видна нормально
             ctx.drawImage(images.hand, -armWidth / 2, -armHeight + 8, armWidth, armHeight);
             ctx.restore();
         }
 
-        // --- ПРАВАЯ РУКА ---
         if (images.hand) {
             ctx.save();
             ctx.translate(shoulderRX, shoulderRY);
@@ -237,7 +242,6 @@ draw(ctx) {
             ctx.restore();
         }
 
-        // --- ГОЛОВА ---
         if (images.player) {
             ctx.save();
             ctx.rotate(Math.PI / 2);
@@ -255,13 +259,23 @@ export class GameObject {
         this.y = y;
         this.type = dataId;
         
-        this.hp = data.maxHp;
-        this.maxHp = data.maxHp;
+        this.offsetX = 0;
+        this.offsetY = 0;
+
+        // Стандарт 255 ХП и длительность жизни 255 секунд
+        this.hp = 255;
+        this.maxHp = 255;
+        this.lifetime = 255 * 60; // Перевод секунд в фреймы
+
         this.renderRad = data.renderRad;
         this.colRadius = data.colRadius;
         this.textures = [...data.textures].sort((a, b) => b.hp - a.hp);
 
         this.updateState();
+    }
+
+    update() {
+        if (this.lifetime > 0) this.lifetime--;
     }
 
     updateState() {
@@ -278,10 +292,15 @@ export class GameObject {
     draw(ctx) {
         const img = images[this.currentTexture];
         if (img?.complete) {
+            this.offsetX *= 0.82;
+            this.offsetY *= 0.82;
+            if (Math.abs(this.offsetX) < 0.1) this.offsetX = 0;
+            if (Math.abs(this.offsetY) < 0.1) this.offsetY = 0;
+
             ctx.drawImage(
                 img, 
-                this.x - this.renderRad, 
-                this.y - this.renderRad, 
+                this.x + this.offsetX - this.renderRad, 
+                this.y + this.offsetY - this.renderRad, 
                 this.renderRad * 2, 
                 this.renderRad * 2
             );
@@ -295,89 +314,120 @@ export class Greed {
         this.vx = 0; this.vy = 0;
         this.colRadius = GAME_SETTINGS.greed.colRadius;
         this.renderRad = GAME_SETTINGS.greed.renderRad;
-        this.hp = GAME_SETTINGS.greed.hp;
+        
+        // Стандарт 255 ХП и длительность жизни 255 секунд
+        this.hp = 255;
+        this.lifetime = 255 * 60;
+
         this.stolenItem = null;
         this.isFleeing = false;
         this.type = 'greed';
         this.currentTexture = 'greed';
         this.trail = [];
         this.attackCooldown = 0;
+
+        this.offsetX = 0;
+        this.offsetY = 0;
     }
 
     update(player) {
-        const dx = player.x - this.x;
-        const dy = player.y - this.y;
-        const dist = Math.hypot(dx, dy);
+        if (this.lifetime > 0) this.lifetime--;
 
-        let ax = 0, ay = 0;
+        let targetX = player.x;
+        let targetY = player.y;
 
         if (this.isFleeing || !state.isNight) {
-            const targetX = this.x > WORLD_SIZE / 2 ? WORLD_SIZE * 1.2 : -WORLD_SIZE * 0.2;
-            const targetY = this.y > WORLD_SIZE / 2 ? WORLD_SIZE * 1.2 : -WORLD_SIZE * 0.2;
-            const angle = Math.atan2(targetY - this.y, targetX - this.x);
-            ax = Math.cos(angle);
-            ay = Math.sin(angle);
-            
+            targetX = this.x > WORLD_SIZE / 2 ? WORLD_SIZE * 1.5 : -WORLD_SIZE * 0.5;
+            targetY = this.y > WORLD_SIZE / 2 ? WORLD_SIZE * 1.5 : -WORLD_SIZE * 0.5;
             if (this.x < -1000 || this.x > WORLD_SIZE + 1000 || this.y < -1000 || this.y > WORLD_SIZE + 1000) {
                 this.hp = 0;
             }
-        } else {
-            if (dist > 5) {
-                ax = dx / dist;
-                ay = dy / dist;
-            }
-            
-            if (dist < (this.colRadius + player.colRadius + 10)) {
-                resolveCollision(this, player);
-                if (this.attackCooldown <= 0) {
-                    player.hp -= GAME_SETTINGS.greed.damage;
-                    this.attackCooldown = GAME_SETTINGS.greed.attackCooldown;
-                    if (Math.random() < 0.2) this.steal(player);
+        }
+
+        // --- ИИ АЛГОРИТМ: CONTEXT STEERING (8 НАПРАВЛЕНИЙ ПРЕДВИДЕНИЯ ПРЕПЯТСТВИЙ) ---
+        const numDirs = 8;
+        const danger = new Array(numDirs).fill(0);
+        const interest = new Array(numDirs).fill(0);
+
+        const targetAngle = Math.atan2(targetY - this.y, targetX - this.x);
+
+        // Расчет векторов интереса к цели
+        for (let i = 0; i < numDirs; i++) {
+            const dirAngle = (i * Math.PI * 2) / numDirs;
+            const cosDiff = Math.cos(dirAngle - targetAngle);
+            interest[i] = Math.max(0, cosDiff);
+        }
+
+        // Сканирование окружения на наличие маски опасности
+        const lookAheadDist = 130; 
+        for (let i = 0; i < state.objects.length; i++) {
+            const obj = state.objects[i];
+            const dx = obj.x - this.x;
+            const dy = obj.y - this.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = obj.colRadius + this.colRadius + 25;
+
+            if (dist < lookAheadDist + minDist) {
+                const objAngle = Math.atan2(dy, dx);
+                const dangerFactor = 1.0 - Math.max(0, (dist - minDist) / lookAheadDist);
+
+                for (let j = 0; j < numDirs; j++) {
+                    const dirAngle = (j * Math.PI * 2) / numDirs;
+                    const cosDiff = Math.cos(dirAngle - objAngle);
+                    if (cosDiff > 0) {
+                        danger[j] = Math.max(danger[j], cosDiff * dangerFactor * 1.5);
+                    }
                 }
             }
         }
 
-        if (this.attackCooldown > 0) this.attackCooldown--;
-
-        // Продвинутое избегание объектов со скольжением (Tangent Sliding Avoidance)
-        const checkDist = 150;
-        let avoidAx = 0, avoidAy = 0;
-
-        for (let i = 0; i < state.objects.length; i++) {
-            const obj = state.objects[i];
-            const odx = this.x - obj.x;
-            const ody = this.y - obj.y;
-            const odist = Math.hypot(odx, ody);
-            
-            const minClearance = obj.colRadius + this.colRadius + 15;
-            if (odist < minClearance) {
-                const repelStrength = 1 - (odist / minClearance);
-                
-                // Векторное произведение для определения с какой стороны обходить препятствие
-                const crossProduct = ax * ody - ay * odx;
-                const slideDir = crossProduct > 0 ? 1 : -1;
-
-                // Добавляем отталкивание (прямое)
-                avoidAx += (odx / odist) * repelStrength * 1.5;
-                avoidAy += (ody / odist) * repelStrength * 1.5;
-                
-                // Добавляем скольжение (перпендикуляр)
-                avoidAx += (-ody / odist) * slideDir * repelStrength * 3.0;
-                avoidAy += (odx / odist) * slideDir * repelStrength * 3.0;
+        // Выбор лучшего безопасного вектора движения
+        let bestDirIndex = -1;
+        let maxWeight = -Infinity;
+        for (let i = 0; i < numDirs; i++) {
+            const weight = interest[i] - danger[i];
+            if (weight > maxWeight) {
+                maxWeight = weight;
+                bestDirIndex = i;
             }
         }
 
-        ax += avoidAx;
-        ay += avoidAy;
-
-        const mag = Math.hypot(ax, ay);
-        if (mag > 0) {
-            const speed = (this.isFleeing || !state.isNight) ? GAME_SETTINGS.greed.speedFlee : GAME_SETTINGS.greed.speedNormal;
-            this.vx = (ax / mag) * speed;
-            this.vy = (ay / mag) * speed;
+        let finalAngle = targetAngle;
+        if (bestDirIndex !== -1 && danger[bestDirIndex] > 0.1) {
+            finalAngle = (bestDirIndex * Math.PI * 2) / numDirs;
         }
 
-        this.x += this.vx; this.y += this.vy;
+        const speed = (this.isFleeing || !state.isNight) ? GAME_SETTINGS.greed.speedFlee : GAME_SETTINGS.greed.speedNormal;
+        
+        const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+        if (distToPlayer > 5 || this.isFleeing) {
+            this.vx = Math.cos(finalAngle) * speed;
+            this.vy = Math.sin(finalAngle) * speed;
+        } else {
+            this.vx = 0; this.vy = 0;
+        }
+
+        this.x += this.vx; 
+        this.y += this.vy;
+
+        // Твердая физическая разгрузка коллизий (финальный бэкап безопасности)
+        for (let i = 0; i < state.objects.length; i++) {
+            const obj = state.objects[i];
+            if (Math.abs(obj.x - this.x) < 110 && Math.abs(obj.y - this.y) < 110) {
+                resolveCollision(this, obj);
+            }
+        }
+
+        if (!this.isFleeing && state.isNight && distToPlayer < (this.colRadius + player.colRadius + 12)) {
+            resolveCollision(this, player);
+            if (this.attackCooldown <= 0) {
+                player.hp -= GAME_SETTINGS.greed.damage;
+                this.attackCooldown = GAME_SETTINGS.greed.attackCooldown;
+                if (Math.random() < 0.2) this.steal(player);
+            }
+        }
+
+        if (this.attackCooldown > 0) this.attackCooldown--;
 
         if (state.time % 2 === 0) {
             this.trail.push({x: this.x, y: this.y});
@@ -401,15 +451,23 @@ export class Greed {
     }
 
     draw(ctx) {
+        this.offsetX *= 0.82;
+        this.offsetY *= 0.82;
+        if (Math.abs(this.offsetX) < 0.1) this.offsetX = 0;
+        if (Math.abs(this.offsetY) < 0.1) this.offsetY = 0;
+
+        const renderX = this.x + this.offsetX;
+        const renderY = this.y + this.offsetY;
+
         if (images.greed && images.greed.complete) {
-            ctx.drawImage(images.greed, this.x - this.renderRad, this.y - this.renderRad, this.renderRad * 2, this.renderRad * 2);
+            ctx.drawImage(images.greed, renderX - this.renderRad, renderY - this.renderRad, this.renderRad * 2, this.renderRad * 2);
         } else {
             ctx.fillStyle = '#8B008B';
-            ctx.beginPath(); ctx.arc(this.x, this.y, this.colRadius, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(renderX, renderY, this.colRadius, 0, Math.PI * 2); ctx.fill();
         }
         
         if (this.stolenItem && images[this.stolenItem]) {
-            ctx.drawImage(images[this.stolenItem], this.x - 15, this.y - 45, 30, 30);
+            ctx.drawImage(images[this.stolenItem], renderX - 15, renderY - 45, 30, 30);
         }
     }
 }

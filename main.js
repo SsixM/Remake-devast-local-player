@@ -1,7 +1,7 @@
 import { WORLD_SIZE, state, loadTextures, GAME_SETTINGS, ENTITY_DATA } from './config.js';
 import { Player, GameObject, Greed } from './entities.js';
 import { drawSlimeTrail } from './utils.js';
-import { initUI, updateUI } from './ui.js';
+import { drawUI, handleUIClick } from './ui.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d', { alpha: false }); 
@@ -17,12 +17,19 @@ state.player = new Player(WORLD_SIZE / 2, WORLD_SIZE / 2);
 
 window.addEventListener('keydown', e => state.keys[e.code] = true);
 window.addEventListener('keyup', e => state.keys[e.code] = false);
+
 window.addEventListener('mousemove', e => {
     state.mouse.x = e.clientX; 
     state.mouse.y = e.clientY;
 });
+
 window.addEventListener('mousedown', e => {
-    if (e.button === 0) state.player.attack();
+    if (e.button === 0) {
+        const uiClicked = handleUIClick(e.clientX, e.clientY);
+        if (!uiClicked && state.player) {
+            state.player.attack();
+        }
+    }
 });
 
 function generateWorld() {
@@ -55,6 +62,14 @@ function loop() {
     
     state.player.update();
     
+    // Обновление игровых статических объектов и проверка их времени жизни (Lifetime)
+    for (let i = state.objects.length - 1; i >= 0; i--) {
+        state.objects[i].update();
+        if (state.objects[i].lifetime <= 0) {
+            state.objects.splice(i, 1);
+        }
+    }
+    
     if (state.isNight && Math.random() < 0.003 && state.greeds.length < 6) {
         const angle = Math.random() * Math.PI * 2;
         state.greeds.push(new Greed(state.player.x + Math.cos(angle) * 1200, state.player.y + Math.sin(angle) * 1200));
@@ -62,8 +77,8 @@ function loop() {
 
     for (let i = state.greeds.length - 1; i >= 0; i--) {
         state.greeds[i].update(state.player);
-        if (state.greeds[i].hp <= 0) {
-            if (state.greeds[i].stolenItem) {
+        if (state.greeds[i].hp <= 0 || state.greeds[i].lifetime <= 0) {
+            if (state.greeds[i].hp <= 0 && state.greeds[i].stolenItem) {
                 state.player.addToInventory('greed_dust', 1);
             }
             state.greeds.splice(i, 1);
@@ -134,12 +149,12 @@ function loop() {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    updateUI();
+    drawUI(ctx, canvas.width, canvas.height);
+
     requestAnimationFrame(loop);
 }
 
 loadTextures(ctx, () => {
     generateWorld();
-    initUI();
     loop();
 });

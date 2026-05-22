@@ -1,25 +1,13 @@
 {
-  "name": "remake-devast-local-player-",
+  "name": "remake-devast-local-player",
   "version": "1.0.0",
-  "description": "",
-  "main": "main.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "vite build"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/SsixM/Remake-devast-local-player.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/SsixM/Remake-devast-local-player/issues"
-  },
-  "homepage": "https://github.com/SsixM/Remake-devast-local-player#readme",
   "devDependencies": {
-    "vite": "^8.0.14",
-    "vite-plugin-javascript-obfuscator": "^3.1.0"
+    "vite": "^x.x.x",
+    "vite-plugin-javascript-obfuscator": "^x.x.x"
   }
 }

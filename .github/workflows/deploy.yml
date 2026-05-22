@@ -1,0 +1,40 @@
+name: Deploy Obfuscated Game to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # Или master, если твоя главная ветка называется так
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Скачиваем чистый код из репозитория
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # 2. Устанавливаем Node.js на сервер GitHub
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-level: 20
+          cache: 'npm'
+
+      # 3. Устанавливаем зависимости (Vite и плагин-обфускатор)
+      - name: Install Dependencies
+        run: npm install
+
+      # 4. Запускаем сборку (код превращается в зашифрованную кашу в папке dist)
+      - name: Build and Obfuscate Project
+        run: npm run build
+
+      # 5. Берем готовую папку dist и публикуем её на GitHub Pages
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist

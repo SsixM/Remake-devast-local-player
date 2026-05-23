@@ -3,7 +3,7 @@ export const TILE_SIZE = 150;
 
 export const TEXTURE_URLS = {
     floor: 'img/BG.png',
-    outzone: 'img/outzone.png', // ИСПРАВЛЕНО: Убрали img/, так как файл лежит в корне
+    outzone: 'img/outzone.png',
     player: 'img/player.png',
     tree: 'img/tree.png',
     stone: 'img/stone.png',
@@ -21,7 +21,8 @@ export const TEXTURE_URLS = {
     gauge: 'img/gauge.png',
     gaugevector: 'img/gaugevector.png',
     craft: 'img/craft.png',
-    slot: 'img/slot.png'
+    slot: 'img/slot.png',
+    mainmenu: 'img/mainmenu.png'
 };
 
 export const ENTITY_DATA = {
@@ -56,11 +57,19 @@ export const GAME_SETTINGS = {
 
 export const images = {};
 export const state = {
-    objects: [], particles: [], greeds: [],
+    objects: [], particles: [], greeds: [], damageTexts: [],
     camera: { x: 0, y: 0 }, mouse: { x: 0, y: 0, worldX: 0, worldY: 0 }, keys: {},
     time: 0, isNight: false,
     floorPattern: null, outzonePattern: null, player: null,
-    outzoneSpawnCooldown: 0 
+    outzoneSpawnCooldown: 0,
+    
+    inMenu: true,
+    nickname: 'Игрок',
+    inputFocused: false,
+    selectedServer: 0,
+    playButtonScale: 1.0,
+    playButtonTargetScale: 1.0,
+    playButtonBtnZone: null
 };
 
 function processChromakey(img) {

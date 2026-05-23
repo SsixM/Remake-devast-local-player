@@ -15,10 +15,12 @@ export const HUD_CONFIG = {
 };
 
 let isCraftModalOpen = false;
+let craftModalAlpha = 0; 
 let currentCraftCategory = 'weapons';
 
 let clickZones = {
-    slots: [], craftBtn: null, modalClose: null, modalTabs: [], modalRecipes: [], modalBody: null
+    slots: [], craftBtn: null, modalClose: null, modalTabs: [], modalRecipes: [], modalBody: null,
+    menu: { input: null, servers: [], playBtn: null }
 };
 
 function inRect(x, y, rect) {
@@ -36,7 +38,41 @@ function roundRect(ctx, x, y, w, h, radius) {
 
 export function handleUIClick(x, y) {
     if (!state.player) return false;
-    if (isCraftModalOpen) {
+
+    if (state.inMenu) {
+        const canvasWidth = window.innerWidth;
+        const canvasHeight = window.innerHeight;
+        const uiScale = Math.max(0.65, Math.min(1.1, canvasWidth / 1440));
+        const menuW = 740 * uiScale; const menuH = 550 * uiScale;
+        const menuX = canvasWidth / 2 - menuW / 2; const menuY = canvasHeight / 2 - menuH / 2;
+        
+        const frameX = menuX + menuW * 0.17;
+        const frameY = menuY + menuH * 0.49;
+        const frameW = menuW * 0.66;
+        const frameH = menuH * 0.22;
+        const serverRowHeight = 36 * uiScale;
+        const startServerY = frameY + 16 * uiScale + state.menuScrollY;
+
+        if (inRect(x, y, clickZones.menu.input)) { state.inputFocused = true; return true; } 
+        else { state.inputFocused = false; }
+        
+        // Исправлено: Абсолютно точный расчет попадания по строке сервера внутри окна скролла
+        if (x >= frameX && x <= frameX + frameW && y >= frameY && y <= frameY + frameH) {
+            const totalServersCount = 10;
+            for (let i = 0; i < totalServersCount; i++) {
+                const rowY = startServerY + i * serverRowHeight;
+                if (y >= rowY - serverRowHeight / 2 && y <= rowY + serverRowHeight / 2) {
+                    state.selectedServer = i;
+                    return true;
+                }
+            }
+        }
+        
+        if (inRect(x, y, clickZones.menu.playBtn)) { window.dispatchEvent(new CustomEvent('start_game')); return true; }
+        return true;
+    }
+
+    if (isCraftModalOpen && craftModalAlpha > 0.6) {
         if (inRect(x, y, clickZones.modalClose)) { isCraftModalOpen = false; return true; }
         for (let i = 0; i < clickZones.modalTabs.length; i++) {
             if (inRect(x, y, clickZones.modalTabs[i])) { currentCraftCategory = clickZones.modalTabs[i].cat; return true; }
@@ -61,34 +97,75 @@ export function drawUI(ctx, canvasWidth, canvasHeight) {
     if (!state.player) return;
 
     const uiScale = Math.max(0.65, Math.min(1.1, canvasWidth / 1440));
-    const slotSize = 70 * uiScale;
-    const slotGap = 8 * uiScale;
-    const craftBtnSize = 80 * uiScale;
-    
-    const gaugeW = 270 * uiScale;
-    const gaugeH = gaugeW * (191 / 675);
-    const statsW = 540 * uiScale;
-    const statsH = statsW * (464 / 2284);
 
-    const paddingX = 12 * uiScale;
-    const paddingY = 12 * uiScale;
-    const inventoryWidth = (3 * slotSize) + (2 * slotGap) + (paddingX * 2);
-    const invBgH = (2 * slotSize) + (1 * slotGap) + (paddingY * 2);
+    if (state.inMenu) {
+        const menuW = 740 * uiScale; const menuH = 550 * uiScale;
+        const menuX = canvasWidth / 2 - menuW / 2; const menuY = canvasHeight / 2 - menuH / 2;
 
-    const gapPanels = 25 * uiScale;
-    const bottomOffset = 20 * uiScale;
+        if (images.mainmenu && images.mainmenu.complete) { ctx.drawImage(images.mainmenu, menuX, menuY, menuW, menuH); } 
+        else { ctx.fillStyle = '#faf5e6'; roundRect(ctx, menuX, menuY, menuW, menuH, 16 * uiScale); ctx.fill(); }
 
+        clickZones.menu.input = { x: menuX + menuW * 0.342, y: menuY + menuH * 0.354, w: menuW * 0.378, h: menuH * 0.087 };
+        const inp = clickZones.menu.input; ctx.fillStyle = '#2b1d1d'; ctx.font = `700 ${23 * uiScale}px "Comic Neue", cursive`;
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        
+        let typedText = state.nickname; if (state.inputFocused && Math.floor(Date.now() / 400) % 2 === 0) typedText += '|';
+        ctx.fillText(typedText, inp.x + 12 * uiScale, inp.y + inp.h / 2 + 2 * uiScale);
+
+        const frameX = menuX + menuW * 0.17; const frameY = menuY + menuH * 0.49;
+        const frameW = menuW * 0.66; const frameH = menuH * 0.22;
+
+        const totalServersCount = 10; const serverRowHeight = 36 * uiScale; const totalContentHeight = totalServersCount * serverRowHeight;
+        const maxScroll = 0; const minScroll = Math.min(0, frameH - totalContentHeight - 15 * uiScale);
+        if (state.menuScrollY > maxScroll) state.menuScrollY = maxScroll; if (state.menuScrollY < minScroll) state.menuScrollY = minScroll;
+
+        ctx.save(); ctx.beginPath(); ctx.rect(frameX + 5 * uiScale, frameY + 5 * uiScale, frameW - 10 * uiScale, frameH - 10 * uiScale); ctx.clip();
+
+        clickZones.menu.servers = []; const startServerY = frameY + 16 * uiScale + state.menuScrollY;
+
+        for (let i = 0; i < totalServersCount; i++) {
+            const rowY = startServerY + i * serverRowHeight; const rowX = frameX + 35 * uiScale;
+            clickZones.menu.servers.push({ x: frameX + 15 * uiScale, y: rowY - serverRowHeight / 2, w: frameW - 30 * uiScale, h: serverRowHeight, index: i });
+            const isSelected = state.selectedServer === i;
+            if (isSelected) {
+                ctx.fillStyle = '#ff7a00'; ctx.font = `700 ${20 * uiScale}px "Comic Neue", cursive`; ctx.fillText(`➢  Server ${i + 1}`, rowX, rowY);
+            } else {
+                ctx.fillStyle = '#4a3b32'; ctx.font = `700 ${18 * uiScale}px "Comic Neue", cursive`; ctx.fillText(`    Server ${i + 1}`, rowX, rowY);
+            }
+        }
+        ctx.restore();
+
+        if (totalContentHeight > frameH) {
+            ctx.save(); const barH = (frameH / totalContentHeight) * frameH; const scrollPercent = state.menuScrollY / minScroll;
+            const barY = frameY + (frameH - barH) * scrollPercent; ctx.fillStyle = 'rgba(74, 59, 50, 0.35)';
+            roundRect(ctx, frameX + frameW - 12 * uiScale, barY + 4 * uiScale, 5 * uiScale, barH - 8 * uiScale, 2 * uiScale); ctx.fill(); ctx.restore();
+        }
+
+        clickZones.menu.playBtn = { x: menuX + menuW * 0.250, y: menuY + menuH * 0.738, w: menuW * 0.510, h: menuH * 0.184 };
+        const btn = clickZones.menu.playBtn; state.playButtonBtnZone = btn; 
+        state.playButtonScale += (state.playButtonTargetScale - state.playButtonScale) * 0.12;
+
+        if (images.mainmenu && images.mainmenu.complete) {
+            ctx.save(); const centerX = btn.x + btn.w / 2; const centerY = btn.y + btn.h / 2;
+            ctx.translate(centerX, centerY); ctx.scale(state.playButtonScale, state.playButtonScale);
+            const srcX = images.mainmenu.naturalWidth * 0.250; const srcY = images.mainmenu.naturalHeight * 0.738;
+            const srcW = images.mainmenu.naturalWidth * 0.510; const srcH = images.mainmenu.naturalHeight * 0.184;
+            ctx.drawImage(images.mainmenu, srcX, srcY, srcW, srcH, -btn.w / 2, -btn.h / 2, btn.w, btn.h); ctx.restore();
+        }
+        return; 
+    }
+
+    const slotSize = 70 * uiScale; const slotGap = 8 * uiScale; const craftBtnSize = 80 * uiScale;
+    const gaugeW = 270 * uiScale; const gaugeH = gaugeW * (191 / 675); const statsW = 540 * uiScale; const statsH = statsW * (464 / 2284);
+    const paddingX = 12 * uiScale; const paddingY = 12 * uiScale; const inventoryWidth = (3 * slotSize) + (2 * slotGap) + (paddingX * 2);
+    const invBgH = (2 * slotSize) + (1 * slotGap) + (paddingY * 2); const gapPanels = 25 * uiScale; const bottomOffset = 20 * uiScale;
     const totalHudWidth = gaugeW + gapPanels + statsW + gapPanels + inventoryWidth;
-    const startX = canvasWidth / 2 - totalHudWidth / 2;
-    const hudBottomY = canvasHeight - bottomOffset;
+    const startX = canvasWidth / 2 - totalHudWidth / 2; const hudBottomY = canvasHeight - bottomOffset;
 
     clickZones.slots = []; clickZones.modalTabs = []; clickZones.modalRecipes = [];
 
-    // --- ПОЛОСА ДЕЙСТВИЯ ---
     if (state.player.actionTimer > 0) {
-        const barW = 200 * uiScale, barH = 10 * uiScale;
-        const barX = canvasWidth / 2 - barW / 2;
-        const barY = canvasHeight / 2 + 120 * uiScale;
+        const barW = 200 * uiScale, barH = 10 * uiScale; const barX = canvasWidth / 2 - barW / 2; const barY = canvasHeight / 2 + 120 * uiScale;
         const pct = 1 - (state.player.actionTimer / state.player.actionTotal);
         ctx.fillStyle = '#fff'; ctx.fillRect(barX, barY, barW, barH);
         ctx.strokeStyle = HUD_CONFIG.colors.stroke; ctx.lineWidth = 2; ctx.strokeRect(barX, barY, barW, barH);
@@ -97,26 +174,18 @@ export function drawUI(ctx, canvasWidth, canvasHeight) {
         ctx.fillText(state.player.actionType === 'eat' ? 'ПОЕДАНИЕ...' : 'ЭКИПИРОВКА...', canvasWidth / 2, barY - 5);
     }
 
-    // --- ПАНЕЛЬ СУТОК ---
     const gaugeX = startX; const gaugeY = hudBottomY - gaugeH;
     if (images.gauge?.complete) ctx.drawImage(images.gauge, gaugeX, gaugeY, gaugeW, gaugeH);
 
-    const dayProgress = state.time / GAME_SETTINGS.dayNightCycle;
-    const angle = (dayProgress * Math.PI) - (Math.PI / 2); 
-    const pivotX = gaugeX + gaugeW / 2; const pivotY = gaugeY + gaugeH * 0.86; 
-    const vectorW = 16 * uiScale; const vectorH = vectorW * (110 / 38);
+    const dayProgress = state.time / GAME_SETTINGS.dayNightCycle; const angle = (dayProgress * Math.PI) - (Math.PI / 2); 
+    const pivotX = gaugeX + gaugeW / 2; const pivotY = gaugeY + gaugeH * 0.86; const vectorW = 16 * uiScale; const vectorH = vectorW * (110 / 38);
 
     ctx.save(); ctx.translate(pivotX, pivotY); ctx.rotate(angle);
     if (images.gaugevector?.complete) ctx.drawImage(images.gaugevector, -vectorW / 2, -vectorH + (vectorW * 0.4), vectorW, vectorH);
     ctx.restore();
 
-    // --- ПАНЕЛЬ СТАТОВ ---
     const statsX = gaugeX + gaugeW + gapPanels; const statsY = hudBottomY - statsH;
-
-    // Сначала рисуем чистую рамку без хромакея из stat0
-    if (images['stat0_clean']) {
-        ctx.drawImage(images['stat0_clean'], statsX, statsY, statsW, statsH);
-    }
+    if (images['stat0_clean']) ctx.drawImage(images['stat0_clean'], statsX, statsY, statsW, statsH);
 
     const statRows = [
         { val: state.player.hp, max: state.player.maxHp, color: HUD_CONFIG.colors.hpFill },
@@ -128,44 +197,22 @@ export function drawUI(ctx, canvasWidth, canvasHeight) {
     const barRelativeYPositions = [0.08, 0.39, 0.70]; 
 
     statRows.forEach((stat, i) => {
-        const barX = statsX + statsW * barRelativeX;
-        const barY = statsY + statsH * barRelativeYPositions[i];
-        const barW = statsW * barRelativeW;
-        const barH = statsH * barRelativeH;
-        const pct = Math.max(0, Math.min(1, stat.val / stat.max));
+        const bX = statsX + statsW * barRelativeX; const bY = statsY + statsH * barRelativeYPositions[i];
+        const bW = statsW * barRelativeW; const bH = statsH * barRelativeH; const pct = Math.max(0, Math.min(1, stat.val / stat.max));
+        ctx.fillStyle = 'rgba(40, 40, 40, 0.25)'; ctx.fillRect(bX + (bW * pct), bY, bW * (1 - pct), bH);
 
-        // Рисуем задний полупрозрачный фон для пустого места шкалы
-        ctx.fillStyle = 'rgba(40, 40, 40, 0.25)';
-        ctx.fillRect(barX + (barW * pct), barY, barW * (1 - pct), barH);
-
-        // Попроцентно вырезаем заполненную шкалу из исходного hudstat.jpg
         if (pct > 0 && images.hudstat?.complete) {
-            const imgW = images.hudstat.width;
-            const imgH = images.hudstat.height;
-
-            const sx = imgW * barRelativeX;
-            const sy = imgH * barRelativeYPositions[i];
-            const sw = imgW * barRelativeW * pct;
-            const sh = imgH * barRelativeH;
-
-            ctx.drawImage(images.hudstat, sx, sy, sw, sh, barX, barY, barW * pct, barH);
+            const imgW = images.hudstat.width; const imgH = images.hudstat.height;
+            const sx = imgW * barRelativeX; const sy = imgH * barRelativeYPositions[i]; const sw = imgW * barRelativeW * pct; const sh = imgH * barRelativeH;
+            ctx.drawImage(images.hudstat, sx, sy, sw, sh, bX, bY, bW * pct, bH);
         }
-
-        // Мягкий цветовой оверлей поверх текстуры
-        ctx.fillStyle = stat.color;
-        ctx.fillRect(barX, barY, barW * pct, barH);
-
-        // Текст
-        ctx.fillStyle = HUD_CONFIG.colors.text;
-        ctx.font = `700 ${15 * uiScale}px "Comic Neue", cursive`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(`${Math.ceil(stat.val)} / ${stat.max}`, barX + barW / 2, barY + barH / 2 + 1);
+        ctx.fillStyle = stat.color; ctx.fillRect(bX, bY, bW * pct, bH);
+        ctx.fillStyle = HUD_CONFIG.colors.text; ctx.font = `700 ${15 * uiScale}px "Comic Neue", cursive`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`${Math.ceil(stat.val)} / ${stat.max}`, bX + bW / 2, bY + bH / 2 + 1);
     });
 
-    // --- ИНВЕНТАРЬ И КНОПКА КРАФТА ---
     const rightBlockX = statsX + statsW + gapPanels; const invBgY = hudBottomY - invBgH;
-    const btnX = rightBlockX + paddingX + (slotSize / 2) - (craftBtnSize / 2);
-    const btnY = invBgY - craftBtnSize - 8 * uiScale;
+    const btnX = rightBlockX + paddingX + (slotSize / 2) - (craftBtnSize / 2); const btnY = invBgY - craftBtnSize - 8 * uiScale;
 
     clickZones.craftBtn = { x: btnX, y: btnY, w: craftBtnSize, h: craftBtnSize };
     if (images.craft?.complete) ctx.drawImage(images.craft, btnX, btnY, craftBtnSize, craftBtnSize);
@@ -174,72 +221,60 @@ export function drawUI(ctx, canvasWidth, canvasHeight) {
     ctx.strokeStyle = HUD_CONFIG.colors.stroke; ctx.lineWidth = Math.max(2, 3 * uiScale); ctx.stroke();
 
     for (let i = 0; i < state.player.inventory.length; i++) {
-        if (i >= 6) break;
         const col = i % 3; const row = Math.floor(i / 3);
-        const slotX = rightBlockX + paddingX + col * (slotSize + slotGap);
-        const slotY = invBgY + paddingY + row * (slotSize + slotGap);
-
+        const slotX = rightBlockX + paddingX + col * (slotSize + slotGap); const slotY = invBgY + paddingY + row * (slotSize + slotGap);
         clickZones.slots.push({ x: slotX, y: slotY, w: slotSize, h: slotSize });
 
         ctx.save();
-        if (i === state.player.selectedSlot) {
-            ctx.shadowColor = HUD_CONFIG.colors.slotHighlight; ctx.shadowBlur = 10 * uiScale; ctx.translate(0, -4 * uiScale);
-        }
-
+        if (i === state.player.selectedSlot) { ctx.shadowColor = HUD_CONFIG.colors.slotHighlight; ctx.shadowBlur = 10 * uiScale; ctx.translate(0, -4 * uiScale); }
         if (images.slot?.complete) ctx.drawImage(images.slot, slotX, slotY, slotSize, slotSize);
         ctx.shadowBlur = 0;
 
         const slotData = state.player.inventory[i];
         if (slotData?.type) {
             const img = images[slotData.type];
-            if (img?.complete) {
-                const itemPadding = slotSize * 0.15;
-                ctx.drawImage(img, slotX + itemPadding, slotY + itemPadding, slotSize - itemPadding * 2, slotSize - itemPadding * 2);
-            }
+            if (img?.complete) { const itemPadding = slotSize * 0.15; ctx.drawImage(img, slotX + itemPadding, slotY + itemPadding, slotSize - itemPadding * 2, slotSize - itemPadding * 2); }
             if (slotData.count > 1) {
-                ctx.fillStyle = HUD_CONFIG.colors.text; ctx.font = `700 ${14 * uiScale}px "Comic Neue", cursive`;
-                ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+                ctx.fillStyle = HUD_CONFIG.colors.text; ctx.font = `700 ${14 * uiScale}px "Comic Neue", cursive`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
                 ctx.fillText(slotData.count, slotX + slotSize - 6 * uiScale, slotY + slotSize - 4 * uiScale);
             }
         }
         ctx.restore();
     }
 
-    if (isCraftModalOpen) drawCraftModal(ctx, canvasWidth, canvasHeight, uiScale);
+    if (isCraftModalOpen) { craftModalAlpha += (1 - craftModalAlpha) * 0.14; } 
+    else { craftModalAlpha += (0 - craftModalAlpha) * 0.14; }
 
-    if (state.isNight) {
-        const halfDay = GAME_SETTINGS.dayNightCycle / 2;
-        const nightProgress = (state.time - halfDay) / halfDay;
-        let hudNightOpacity = 0.30; 
-        if (nightProgress < 0.1) hudNightOpacity = (nightProgress / 0.1) * 0.30;
-        if (nightProgress > 0.9) hudNightOpacity = ((1 - nightProgress) / 0.1) * 0.30;
-        ctx.save(); ctx.fillStyle = `rgba(5, 5, 25, ${hudNightOpacity})`; ctx.fillRect(0, 0, canvasWidth, canvasHeight); ctx.restore();
+    if (craftModalAlpha > 0.01) {
+        drawCraftModal(ctx, canvasWidth, canvasHeight, uiScale, craftModalAlpha);
     }
 }
 
-function drawCraftModal(ctx, cw, ch, uiScale) {
+function drawCraftModal(ctx, cw, ch, uiScale, alpha) {
     const modW = 650 * uiScale, modH = 460 * uiScale;
     const modX = cw / 2 - modW / 2; const modY = ch / 2 - modH / 2;
     clickZones.modalBody = { x: modX, y: modY, w: modW, h: modH };
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    
+    const popScale = 0.94 + alpha * 0.06;
+    ctx.translate(cw / 2, ch / 2); ctx.scale(popScale, popScale); ctx.translate(-cw / 2, -ch / 2);
 
     if (images.hudstat?.complete) ctx.drawImage(images.hudstat, modX, modY, modW, modH);
 
     const closeR = 15 * uiScale; const closeX = modX + modW - 30 * uiScale; const closeY = modY + 30 * uiScale;
     clickZones.modalClose = { x: closeX - closeR, y: closeY - closeR, w: closeR * 2, h: closeR * 2 };
 
-    ctx.beginPath(); ctx.arc(closeX, closeY, closeR, 0, Math.PI * 2);
-    ctx.strokeStyle = HUD_CONFIG.colors.modalStroke; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(closeX, closeY, closeR, 0, Math.PI * 2); ctx.strokeStyle = HUD_CONFIG.colors.modalStroke; ctx.lineWidth = 2; ctx.stroke();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `700 ${16 * uiScale}px "Comic Neue", cursive`;
     ctx.fillStyle = HUD_CONFIG.colors.text; ctx.fillText('X', closeX, closeY + 1);
 
-    let tabX = modX + 35 * uiScale; const tabY = modY + 30 * uiScale;
-    const categories = Object.keys(GAME_SETTINGS.crafting);
+    let tabX = modX + 35 * uiScale; const tabY = modY + 30 * uiScale; const categories = Object.keys(GAME_SETTINGS.crafting);
 
     categories.forEach(cat => {
-        const title = cat === 'weapons' ? 'ОРУЖИЕ' : 'ИНСТРУМЕНТЫ';
-        ctx.font = `700 ${15 * uiScale}px "Comic Neue", cursive`;
-        const textW = ctx.measureText(title).width;
-        const tabW = textW + 30 * uiScale; const tabH = 35 * uiScale;
+        const title = cat === 'weapons' ? 'ОРУЖИЕ' : 'ИНСТРУМЕНТЫ'; ctx.font = `700 ${15 * uiScale}px "Comic Neue", cursive`;
+        const textW = ctx.measureText(title).width; const tabW = textW + 30 * uiScale; const tabH = 35 * uiScale;
 
         clickZones.modalTabs.push({ x: tabX, y: tabY, w: tabW, h: tabH, cat: cat });
         ctx.fillStyle = currentCraftCategory === cat ? HUD_CONFIG.colors.dayLight : '#fff';
@@ -250,8 +285,7 @@ function drawCraftModal(ctx, cw, ch, uiScale) {
 
     ctx.beginPath(); ctx.moveTo(modX + 35 * uiScale, tabY + 48 * uiScale); ctx.lineTo(modX + modW - 35 * uiScale, tabY + 48 * uiScale); ctx.stroke();
 
-    const recipes = GAME_SETTINGS.crafting[currentCraftCategory];
-    let recY = tabY + 65 * uiScale;
+    const recipes = GAME_SETTINGS.crafting[currentCraftCategory]; let recY = tabY + 65 * uiScale;
 
     recipes.forEach(recipe => {
         const recH = 70 * uiScale; const recW = modW - 70 * uiScale;
@@ -265,18 +299,18 @@ function drawCraftModal(ctx, cw, ch, uiScale) {
         ctx.fillText(costStr, modX + 50 * uiScale, recY + 48 * uiScale);
 
         const canCraft = state.player && Object.entries(recipe.cost).every(([id, amt]) => state.player.countItem(id) >= amt);
-        const btnW = 100 * uiScale, btnH = 40 * uiScale;
-        const btnX = modX + 35 * uiScale + recW - btnW - 15 * uiScale; const btnY = recY + (recH - btnH) / 2;
+        const btnW = 100 * uiScale, btnH = 40 * uiScale; const btnX = modX + 35 * uiScale + recW - btnW - 15 * uiScale; const btnY = recY + (recH - btnH) / 2;
 
         clickZones.modalRecipes.push({ x: btnX, y: btnY, w: btnW, h: btnH, canCraft: canCraft, recipe: recipe });
 
         ctx.save(); if (!canCraft) ctx.globalAlpha = 0.45;
-        if (images.craft?.complete) { ctx.drawImage(images.craft, btnX, btnY, btnW, btnH); } else {
-            ctx.fillStyle = HUD_CONFIG.colors.dayLight; roundRect(ctx, btnX, btnY, btnW, btnH, 8 * uiScale); ctx.fill(); ctx.stroke();
-        }
+        if (images.craft?.complete) { ctx.drawImage(images.craft, btnX, btnY, btnW, btnH); } 
+        else { ctx.fillStyle = HUD_CONFIG.colors.dayLight; roundRect(ctx, btnX, btnY, btnW, btnH, 8 * uiScale); ctx.fill(); ctx.stroke(); }
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = HUD_CONFIG.colors.text; ctx.font = `700 ${13 * uiScale}px "Comic Neue", cursive`;
         ctx.fillText('СОЗДАТЬ', btnX + btnW / 2, btnY + btnH / 2 + 1); ctx.restore();
 
         recY += recH + 12 * uiScale;
     });
+    
+    ctx.restore();
 }

@@ -1,5 +1,5 @@
 import { images, state, GAME_SETTINGS, ENTITY_DATA, WORLD_SIZE } from './config.js';
-import { resolveCollision } from './utils.js';
+import { resolveCollision, createParticles } from './utils.js';
 
 const AI_DANGER = new Float32Array(8);
 const AI_INTEREST = new Float32Array(8);
@@ -65,12 +65,23 @@ export class Player {
             this.hp = Math.max(0, this.hp - (GAME_SETTINGS.outzone.damagePerSec / 60));
         }
 
+        const isMoving = ax !== 0 || ay !== 0;
         const speedMult = state.keys['ShiftLeft'] && this.stamina > 0 ? GAME_SETTINGS.player.sprintMultiplier : 1;
-        if (ax !== 0 || ay !== 0) {
+        if (isMoving) {
             const mag = Math.sqrt(ax * ax + ay * ay);
             this.vx += (ax / mag) * currentAccel * speedMult;
             this.vy += (ay / mag) * currentAccel * speedMult;
-            if (state.keys['ShiftLeft']) this.stamina -= 0.35;
+            
+            if (state.keys['ShiftLeft'] && this.stamina > 0) {
+                this.stamina -= 0.35;
+                if (state.time % 6 === 0) {
+                    state.particles.push({
+                        x: this.x - this.vx * 2, y: this.y - this.vy * 2 + 15,
+                        vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 1.5,
+                        life: 0.5, size: Math.random() * 4 + 2, color: 'rgba(210, 200, 185, 0.4)'
+                    });
+                }
+            }
         } else {
             this.stamina = Math.min(this.maxStamina, this.stamina + 0.6);
         }
@@ -112,12 +123,12 @@ export class Player {
         const currentDamage = equippedData && equippedData.damage ? equippedData.damage : GAME_SETTINGS.player.unarmedDamage;
         const currentToolTier = equippedData && equippedData.toolTier ? equippedData.toolTier : 'hand';
 
+        const particleColors = { 'tree': '#8B4513', 'stone': '#777777', 'bush': '#ff3333' };
+
         for (let i = state.objects.length - 1; i >= 0; i--) {
             const obj = state.objects[i];
-            const dx = obj.x - this.x;
-            if (dx > 160 || dx < -160) continue;
-            const dy = obj.y - this.y;
-            if (dy > 160 || dy < -160) continue;
+            const dx = obj.x - this.x; if (dx > 160 || dx < -160) continue;
+            const dy = obj.y - this.y; if (dy > 160 || dy < -160) continue;
 
             const distSq = dx * dx + dy * dy;
             const maxHitDist = 75 + obj.colRadius;
@@ -129,13 +140,34 @@ export class Player {
                 if (Math.abs(diffAngle) < Math.PI / 2.2) {
                     const dropData = ENTITY_DATA[obj.type];
                     const isCorrectTool = !dropData.requiredTool || dropData.requiredTool === currentToolTier;
-                    if (isCorrectTool) obj.hp -= currentDamage; else obj.hp -= 15;
+                    
+                    // Исправлено: если бьем пустой рукой ("hand"), урон равен дефолтным 49, а не 15
+                    const damageDealt = isCorrectTool ? currentDamage : (currentToolTier === 'hand' ? currentDamage : 15);
+                    
+                    obj.hp -= damageDealt;
                     obj.offsetX = Math.cos(angleToObj) * 14; obj.offsetY = Math.sin(angleToObj) * 14;
+                    obj.wobble = 18; 
+                    
+                    createParticles(obj.x, obj.y, particleColors[obj.type] || '#ffffff');
+                    
+                    state.damageTexts.push({
+                        x: obj.x, y: obj.y - obj.renderRad * 0.5,
+                        text: `-${damageDealt}`,
+                        color: '#ffcc00', life: 1.0
+                    });
+
                     obj.updateState();
+                    
                     if (obj.hp <= 0) {
                         if (dropData && dropData.drop && isCorrectTool) {
                             const dropCount = Math.floor(Math.random() * (dropData.dropRange[1] - dropData.dropRange[0] + 1)) + dropData.dropRange[0];
                             this.addToInventory(dropData.drop, dropCount);
+                            
+                            state.damageTexts.push({
+                                x: obj.x, y: obj.y - 40,
+                                text: `+${dropCount} ${GAME_SETTINGS.items[dropData.drop].name}`,
+                                color: '#55ff55', life: 1.0
+                            });
                         }
                         state.objects[i] = state.objects[state.objects.length - 1];
                         state.objects.pop();
@@ -154,6 +186,13 @@ export class Player {
                 if (Math.abs(diffAngle) < Math.PI / 2.2) {
                     g.hp -= currentDamage; g.isFleeing = true;
                     g.offsetX = Math.cos(angleToGreed) * 20; g.offsetY = Math.sin(angleToGreed) * 20;
+                    
+                    createParticles(g.x, g.y, '#8B008B');
+                    state.damageTexts.push({
+                        x: g.x, y: g.y - 25,
+                        text: `-${currentDamage}`,
+                        color: '#ff4444', life: 1.0
+                    });
                 }
             }
         }
@@ -161,6 +200,7 @@ export class Player {
 
     draw(ctx) {
         ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
+
         const armWidth = 22, armHeight = 45; let rArmRotation = Math.PI / 2.2, rArmPullback = 5, playerSquashX = 1;
         if (this.attackTimer > 0) {
             const t = 12 - this.attackTimer;
@@ -178,6 +218,18 @@ export class Player {
         }
         if (images.player) { ctx.save(); ctx.rotate(Math.PI / 2); ctx.drawImage(images.player, -30, -35, 60, 60); ctx.restore(); }
         ctx.restore();
+
+        ctx.save();
+        ctx.translate(this.x, this.y - 54);
+        ctx.fillStyle = '#000000';
+        ctx.font = '700 15px "Comic Neue", cursive';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.strokeText(state.nickname || "Игрок", 0, 0);
+        ctx.fillText(state.nickname || "Игрок", 0, 0);
+        ctx.restore();
     }
 }
 
@@ -188,17 +240,26 @@ export class GameObject {
         this.lifetime = Math.floor((800 + Math.random() * 1400) * 60);
         this.renderRad = data.renderRad; this.colRadius = data.colRadius;
         this.textures = [...data.textures].sort((a, b) => b.hp - a.hp); this.updateState();
-        
-        // 3. ИСПРАВЛЕНО: Флаг масштабирования для плавного роста при появлении
         this.scale = 0;
+        this.spawnProgress = 0; // Шаг для интерполяции появления
+        this.wobble = 0;
     }
     update() { 
         if (this.lifetime > 0) this.lifetime--; 
-        // Плавно увеличиваем размер объекта до 1.0 за ~0.75 сек (45 тиков)
-        if (this.scale < 1) {
-            this.scale += 1 / 45;
-            if (this.scale > 1) this.scale = 1;
+        
+        // Красивая упругая анимация появления (Ease Out Back)
+        if (this.spawnProgress < 1) {
+            this.spawnProgress += 1 / 35; // Длительность ~35 кадров
+            if (this.spawnProgress >= 1) {
+                this.spawnProgress = 1;
+                this.scale = 1;
+            } else {
+                const t = this.spawnProgress - 1;
+                // Математическая формула отскока для эффекта "поп-ап"
+                this.scale = 1 + 2.70158 * Math.pow(t, 3) + 1.70158 * Math.pow(t, 2);
+            }
         }
+        this.wobble *= 0.84;
     }
     updateState() {
         const hpPercent = (this.hp / this.maxHp) * 100; this.currentTexture = this.textures[0].src;
@@ -209,10 +270,15 @@ export class GameObject {
         if (img?.complete) {
             this.offsetX *= 0.82; this.offsetY *= 0.82;
             if (Math.abs(this.offsetX) < 0.1) this.offsetX = 0; if (Math.abs(this.offsetY) < 0.1) this.offsetY = 0;
-            
-            // Применяем текущий коэффициент плавного масштабирования
             const currentRad = this.renderRad * this.scale;
-            ctx.drawImage(img, this.x + this.offsetX - currentRad, this.y + this.offsetY - currentRad, currentRad * 2, currentRad * 2);
+            
+            ctx.save();
+            ctx.translate(this.x + this.offsetX, this.y + this.offsetY);
+            if (this.wobble > 0.05) {
+                ctx.rotate(Math.sin(state.time * 0.65) * (this.wobble * Math.PI / 180));
+            }
+            ctx.drawImage(img, -currentRad, -currentRad, currentRad * 2, currentRad * 2);
+            ctx.restore();
         }
     }
 }
@@ -222,7 +288,9 @@ export class Greed {
         this.x = x; this.y = y; this.vx = 0; this.vy = 0;
         this.colRadius = GAME_SETTINGS.greed.colRadius; this.renderRad = GAME_SETTINGS.greed.renderRad;
         this.hp = 255; this.lifetime = 255 * 60;
-        this.stolenItem = null; this.isFleeing = false;
+        this.stolenItem = null; 
+        this.stolenCount = 0; // Исправлено: точное количество сохраненного лута
+        this.isFleeing = false;
         this.isOutzoneGreed = false;
         this.type = 'greed'; this.currentTexture = 'greed';
         this.attackCooldown = 0;
@@ -244,12 +312,7 @@ export class Greed {
         if (this.isFleeing || (!state.isNight && !this.isOutzoneGreed)) {
             targetX = this.x > WORLD_SIZE / 2 ? WORLD_SIZE * 1.5 : -WORLD_SIZE * 0.5;
             targetY = this.y > WORLD_SIZE / 2 ? WORLD_SIZE * 1.5 : -WORLD_SIZE * 0.5;
-            
-            // 4. ИСПРАВЛЕНО: Жадность пропадает ТОЛЬКО если улетела за фиксированный радиус 1400px от игрока
-            // 1400^2 = 1960000
-            if (distToPlayerSq > 1960000) {
-                this.hp = 0;
-            }
+            if (distToPlayerSq > 1960000) { this.hp = 0; }
         }
 
         const numDirs = 8;
@@ -311,6 +374,10 @@ export class Greed {
             resolveCollision(this, player);
             if (this.attackCooldown <= 0) {
                 player.hp -= GAME_SETTINGS.greed.damage; this.attackCooldown = GAME_SETTINGS.greed.attackCooldown;
+                state.damageTexts.push({
+                    x: player.x, y: player.y - 20,
+                    text: `-${GAME_SETTINGS.greed.damage}`, color: '#ff3333', life: 1.0
+                });
                 if (Math.random() < 0.2) this.steal(player);
             }
         }
@@ -329,7 +396,9 @@ export class Greed {
         if (validSlots.length > 0) {
             const slot = validSlots[Math.floor(Math.random() * validSlots.length)];
             const stolenAmount = Math.max(1, Math.floor(slot.count * 0.25)); slot.count -= stolenAmount;
-            this.stolenItem = slot.type; this.isFleeing = true;
+            this.stolenItem = slot.type; 
+            this.stolenCount = stolenAmount; // Сохраняем точный объём кражи
+            this.isFleeing = true;
             if (slot.count <= 0) { slot.type = null; if (player.inventory[player.selectedSlot] === slot) player.currentEquipped = null; }
         }
     }
@@ -338,8 +407,21 @@ export class Greed {
         this.offsetX *= 0.82; this.offsetY *= 0.82;
         if (Math.abs(this.offsetX) < 0.1) this.offsetX = 0; if (Math.abs(this.offsetY) < 0.1) this.offsetY = 0;
         const renderX = this.x + this.offsetX; const renderY = this.y + this.offsetY;
-        if (images.greed?.complete) { ctx.drawImage(images.greed, renderX - this.renderRad, renderY - this.renderRad, this.renderRad * 2, this.renderRad * 2); } 
-        else { ctx.fillStyle = '#8B008B'; ctx.beginPath(); ctx.arc(renderX, renderY, this.colRadius, 0, Math.PI * 2); ctx.fill(); }
+        
+        ctx.save();
+        ctx.translate(renderX, renderY);
+        
+        let squashX = 1 + Math.sin(state.time * 0.25) * 0.08;
+        let squashY = 1 - Math.sin(state.time * 0.25) * 0.08;
+        ctx.scale(squashX, squashY);
+        
+        if (images.greed?.complete) { 
+            ctx.drawImage(images.greed, -this.renderRad, -this.renderRad, this.renderRad * 2, this.renderRad * 2); 
+        } else { 
+            ctx.fillStyle = '#8B008B'; ctx.beginPath(); ctx.arc(0, 0, this.colRadius, 0, Math.PI * 2); ctx.fill(); 
+        }
+        ctx.restore();
+        
         if (this.stolenItem && images[this.stolenItem]) ctx.drawImage(images[this.stolenItem], renderX - 15, renderY - 45, 30, 30);
     }
 }
